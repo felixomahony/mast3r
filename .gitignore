@@ -2,7 +2,6 @@
 checkpoints/
 experiments/
 mlruns/
-dust3r/
 log/
 
 # Byte-compiled / optimized / DLL files
