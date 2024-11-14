@@ -135,7 +135,7 @@ class SparseGA:
 
 def convert_dust3r_pairs_naming(imgs, pairs_in):
     for pair_id in range(len(pairs_in)):
-        for i in range(2):
+        for i in range(len(pairs_in[pair_id])):
             pairs_in[pair_id][i]["instance"] = imgs[pairs_in[pair_id][i]["idx"]]
     return pairs_in
 
@@ -150,6 +150,7 @@ def sparse_global_alignment(
     device="cuda",
     dtype=torch.float32,
     shared_intrinsics=False,
+    laminate=False,
     **kw,
 ):
     """Sparse alignment with MASt3R
@@ -163,9 +164,20 @@ def sparse_global_alignment(
     """
     # Convert pair naming convention from dust3r to mast3r
     pairs_in = convert_dust3r_pairs_naming(imgs, pairs_in)
+
+    if laminate:
+        num_images = max(max(p["idx"] for p in pair) for pair in pairs_in) + 1
+        pairs_for_pass = [0] * num_images
+        for pair in pairs_in:
+            for pair_ in pair:
+                pairs_for_pass[pair_["idx"]] = pair_
+        pairs_for_pass = (pairs_for_pass,)
+    else:
+        pairs_for_pass = pairs_in
+
     # forward pass
     pairs, cache_path = forward_mast3r(
-        pairs_in,
+        pairs_for_pass,
         model,
         cache_path=cache_path,
         subsample=subsample,
@@ -696,49 +708,129 @@ def forward_mast3r(
 ):
     res_paths = {}
 
-    for img1, img2 in tqdm(pairs):
-        idx1 = hash_md5(img1["instance"])
-        idx2 = hash_md5(img2["instance"])
+    for imgs in tqdm(pairs):
+        idxes = tuple(hash_md5(img["instance"]) for img in imgs)
+        # idx1 = hash_md5(img1["instance"])
+        # idx2 = hash_md5(img2["instance"])
 
-        path1 = cache_path + f"/forward/{idx1}/{idx2}.pth"
-        path2 = cache_path + f"/forward/{idx2}/{idx1}.pth"
-        path_corres = (
-            cache_path + f"/corres_conf={desc_conf}_{subsample=}/{idx1}-{idx2}.pth"
+        paths = tuple(
+            cache_path + f"/forward/{idx_i}/{idx_j}.pth"
+            for idx_i in idxes
+            for idx_j in idxes
+            if idx_i != idx_j
         )
-        path_corres2 = (
-            cache_path + f"/corres_conf={desc_conf}_{subsample=}/{idx2}-{idx1}.pth"
+        # path1 = cache_path + f"/forward/{idx1}/{idx2}.pth"
+        # path2 = cache_path + f"/forward/{idx2}/{idx1}.pth"
+        paths_corres = tuple(
+            cache_path + f"/corres_conf={desc_conf}_{subsample=}/{idx_i}-{idx_j}.pth"
+            for idx_i in idxes
+            for idx_j in idxes
+            if idx_i != idx_j
         )
+        # path_corres = (
+        #     cache_path + f"/corres_conf={desc_conf}_{subsample=}/{idx1}-{idx2}.pth"
+        # )
+        # path_corres2 = (
+        #     cache_path + f"/corres_conf={desc_conf}_{subsample=}/{idx2}-{idx1}.pth"
+        # )
 
-        if os.path.isfile(path_corres2) and not os.path.isfile(path_corres):
-            score, (xy1, xy2, confs) = torch.load(path_corres2)
-            torch.save((score, (xy2, xy1, confs)), path_corres)
+        # if os.path.isfile(path_corres2) and not os.path.isfile(path_corres):
+        #     score, (xy1, xy2, confs) = torch.load(path_corres2)
+        #     torch.save((score, (xy2, xy1, confs)), path_corres)
 
-        if not all(os.path.isfile(p) for p in (path1, path2, path_corres)):
+        # if not all(os.path.isfile(p) for p in (path1, path2, path_corres)):
+        if (
+            not all(
+                os.path.isfile(p)
+                for p in (
+                    *paths,
+                    *paths_corres,
+                )
+            )
+            or True
+        ):
             if model is None:
                 continue
-            res = symmetric_inference(model, img1, img2, device=device)
-            X11, X21, X22, X12 = [r["pts3d"][0] for r in res]
-            C11, C21, C22, C12 = [r["conf"][0] for r in res]
-            descs = [r["desc"][0] for r in res]
-            qonfs = [r[desc_conf][0] for r in res]
+            res = symmetric_inference(model, *imgs, device=device)
+            # X11, X21, X22, X12 = [r["pts3d"][0] for r in res]
+            # C11, C21, C22, C12 = [r["conf"][0] for r in res]
+            Xs = [r["pts3d"][0] for r in res]
+            Cs = [r["conf"][0] for r in res]
+            descss = [r["desc"][0] for r in res]
+            qonfss = [r[desc_conf][0] for r in res]
 
-            # save
-            torch.save(to_cpu((X11, C11, X21, C21)), mkdir_for(path1))
-            torch.save(to_cpu((X22, C22, X12, C12)), mkdir_for(path2))
+            for i, img1 in enumerate(imgs):
+                for j, img2 in enumerate(imgs):
+                    n = len(imgs)
+                    if i >= j:
+                        continue
+                    idx1 = hash_md5(img1["instance"])
+                    idx2 = hash_md5(img2["instance"])
 
-            # perform reciprocal matching
-            corres = extract_correspondences(
-                descs, qonfs, device=device, subsample=subsample
-            )
+                    path1 = cache_path + f"/forward/{idx1}/{idx2}.pth"
+                    path2 = cache_path + f"/forward/{idx2}/{idx1}.pth"
 
-            conf_score = (
-                (C11.mean() * C12.mean() * C21.mean() * C22.mean()).sqrt().sqrt()
-            )
-            matching_score = (float(conf_score), float(corres[2].sum()), len(corres[2]))
-            if cache_path is not None:
-                torch.save((matching_score, corres), mkdir_for(path_corres))
+                    path_corres = (
+                        cache_path
+                        + f"/corres_conf={desc_conf}_{subsample=}/{idx1}-{idx2}.pth"
+                    )
+                    path_corres2 = (
+                        cache_path
+                        + f"/corres_conf={desc_conf}_{subsample=}/{idx2}-{idx1}.pth"
+                    )
 
-        res_paths[img1["instance"], img2["instance"]] = (path1, path2), path_corres
+                    X11, C11 = Xs[i * n], Cs[i * n]
+                    X21, C21 = Xs[i * n + (j - i)], Cs[i * n + (j - i)]
+                    X22, C22 = Xs[j * n], Cs[j * n]
+                    X12, C12 = Xs[j * n + ((i - j) % n)], Cs[j * n + ((i - j) % n)]
+
+                    descs = [
+                        descss[i * n],
+                        descss[i * n + (j - i)],
+                        descss[j * n],
+                        descss[j * n + ((i - j) % n)],
+                    ]
+                    qonfs = [
+                        qonfss[i * n],
+                        qonfss[i * n + (j - i)],
+                        qonfss[j * n],
+                        qonfss[j * n + ((i - j) % n)],
+                    ]
+
+                    # save
+                    torch.save(to_cpu((X11, C11, X21, C21)), mkdir_for(path1))
+                    torch.save(to_cpu((X22, C22, X12, C12)), mkdir_for(path2))
+
+                    # perform reciprocal matching
+                    corres = extract_correspondences(
+                        descs, qonfs, device=device, subsample=subsample
+                    )
+
+                    conf_score = (
+                        (C11.mean() * C12.mean() * C21.mean() * C22.mean())
+                        .sqrt()
+                        .sqrt()
+                    )
+                    matching_score = (
+                        float(conf_score),
+                        float(corres[2].sum()),
+                        len(corres[2]),
+                    )
+                    if cache_path is not None:
+                        torch.save((matching_score, corres), mkdir_for(path_corres))
+                        torch.save(
+                            (matching_score, (corres[1], corres[0], corres[2])),
+                            mkdir_for(path_corres2),
+                        )
+
+                    res_paths[img1["instance"], img2["instance"]] = (
+                        path1,
+                        path2,
+                    ), path_corres
+                    res_paths[img2["instance"], img1["instance"]] = (
+                        path2,
+                        path1,
+                    ), path_corres2
 
     del model
     torch.cuda.empty_cache()

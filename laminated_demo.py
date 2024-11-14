@@ -182,27 +182,17 @@ def main(
 
     reconstruction_params = {
         "filelist": image_list,
-        "schedule": "linear",
-        "niter": 300,
-        "min_conf_thr": 3,
-        "as_pointcloud": False,
-        "mask_sky": False,
-        "clean_depth": True,
-        "transparent_cams": True,
-        "cam_size": 0.05,
-        "scenegraph_type": scenegraph_type,
-        "winsize": winsize,
-        "refid": refid,
         "return_attention": True,
+        "subsample": 8,
     }
 
     model = LaminatedMast3rModel.default(device=device)
     recon_fun = functools.partial(
-        get_reconstructed_scene_laminated, export_path, model, device, False, 512
+        get_reconstructed_scene_laminated, model, device, False, 512
     )
 
     start_time = time.time()
-    out_data = recon_fun(**reconstruction_params)
+    out_data, corres = recon_fun(**reconstruction_params)
     end_time = time.time()
 
     out_data = [
@@ -210,12 +200,14 @@ def main(
         for j in range(num_images)
     ]
 
+    print("Logging data to mlflow")
     # now we want to export data
     log_images(image_list)
     log_depth(num_images, out_data)
     log_obj(num_images, out_data, export_path)
     log_attn(out_data, image_list)
     log_features(out_data, image_list)
+    log_corres(image_list, corres)
 
     # log time metric
     mlflow.log_metric("inference_time", end_time - start_time)

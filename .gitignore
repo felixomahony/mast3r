@@ -1,3 +1,10 @@
+# Local ignores
+checkpoints/
+experiments/
+mlruns/
+dust3r/
+log/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -20,15 +27,11 @@ parts/
 sdist/
 var/
 wheels/
-checkpoints/
-experiments/
 pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-mlruns/
-dust3r/
 MANIFEST
 
 # PyInstaller

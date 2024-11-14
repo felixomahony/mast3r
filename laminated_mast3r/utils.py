@@ -5,6 +5,8 @@ import mlflow
 import os
 from pathlib import Path
 from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import torch
 
 
 def log_images(img_list):
@@ -191,3 +193,65 @@ def log_features(out_data, img_list):
             )
 
         mlflow.log_image(final_image, f"features/{i}/features.png")
+
+
+def log_corres(img_list, corres):
+    num_images = len(img_list)
+    num_references = num_images - 1
+    im_shape = np.array((512, 288))
+
+    imgs = [Image.open(img).resize(tuple(im_shape)) for img in img_list]
+
+    color_00 = torch.tensor([1, 0, 0])
+    color_01 = torch.tensor([0, 1, 0])
+    color_10 = torch.tensor([0, 0, 1])
+    color_11 = torch.tensor([1, 1, 0])
+
+    ctr = 0
+    for i in range(len(imgs)):
+        for j in range(len(imgs)):
+            if i >= j:
+                continue
+
+            corres_i = corres[ctr]
+            corres_im_0 = corres_i[0]
+            corres_im_1 = corres_i[1]
+
+            im_0 = np.array(imgs[i])
+            im_1 = np.array(imgs[j])
+
+            corres_im_0_frac = (
+                corres_im_0 - torch.min(corres_im_0, axis=0).values
+            ).float()
+            corres_im_0_frac /= torch.max(corres_im_0_frac, axis=0).values
+
+            colors = (
+                color_00
+                * (1 - corres_im_0_frac[:, 0, None])
+                * (1 - corres_im_0_frac[:, 1, None])
+                + color_01
+                * (1 - corres_im_0_frac[:, 0, None])
+                * corres_im_0_frac[:, 1, None]
+                + color_10
+                * corres_im_0_frac[:, 0, None]
+                * (1 - corres_im_0_frac[:, 1, None])
+                + color_11 * corres_im_0_frac[:, 0, None] * corres_im_0_frac[:, 1, None]
+            )
+
+            plt.subplot(1, 2, 1)
+            plt.imshow(im_0)
+            plt.scatter(corres_im_0[:, 0], corres_im_0[:, 1], c=colors, s=1)
+            plt.axis("off")
+
+            plt.subplot(1, 2, 2)
+            plt.imshow(im_1)
+            plt.scatter(corres_im_1[:, 0], corres_im_1[:, 1], c=colors, s=1)
+            plt.axis("off")
+
+            plt.tight_layout()
+
+            mlflow.log_figure(plt.gcf(), f"corres/{i}_{j}.png")
+
+            plt.close()
+
+            ctr += 1

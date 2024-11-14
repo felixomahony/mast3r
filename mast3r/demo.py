@@ -204,6 +204,7 @@ def get_reconstructed_scene(
     refid,
     TSDF_thresh,
     shared_intrinsics,
+    laminate,
     **kw,
 ):
     """
@@ -224,7 +225,13 @@ def get_reconstructed_scene(
     if scenegraph_type in ["swin", "logwin"] and not win_cyclic:
         scene_graph_params.append("noncyclic")
     scene_graph = "-".join(scene_graph_params)
-    pairs = make_pairs(imgs, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+    pairs = make_pairs(
+        imgs,
+        scene_graph=scene_graph,
+        prefilter=None,
+        symmetrize=True,
+        # laminate=laminate,
+    )
     if optim_level == "coarse":
         niter2 = 0
     # Sparse GA (forward mast3r -> matching -> 3D optim -> 2D refinement -> triangulation)
@@ -252,6 +259,7 @@ def get_reconstructed_scene(
         opt_depth="depth" in optim_level,
         shared_intrinsics=shared_intrinsics,
         matching_conf_thr=matching_conf_thr,
+        laminate=laminate,
         **kw,
     )
     if (
@@ -414,6 +422,11 @@ def main_demo(
                             label="Shared intrinsics",
                             info="Only optimize one set of intrinsics for all views",
                         )
+                        laminate = gradio.Checkbox(
+                            value=False,
+                            label="Laminate Solution",
+                            info="Merge attention matrices for joint solution",
+                        )
                         scenegraph_type = gradio.Dropdown(
                             [
                                 ("complete: all possible image pairs", "complete"),
@@ -513,6 +526,7 @@ def main_demo(
                     refid,
                     TSDF_thresh,
                     shared_intrinsics,
+                    laminate,
                 ],
                 outputs=[scene, outmodel],
             )

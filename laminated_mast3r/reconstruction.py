@@ -1,82 +1,56 @@
 from mast3r.demo import *
 from mast3r.cloud_opt.sparse_ga import symmetric_inference
+from mast3r.cloud_opt.sparse_ga import extract_correspondences
+
+import torch
 
 
 def get_reconstructed_scene_laminated(
-    outdir,
     model,
     device,
     silent,
     image_size,
     filelist,
-    schedule,
-    niter,
-    min_conf_thr,
-    as_pointcloud,
-    mask_sky,
-    clean_depth,
-    transparent_cams,
-    cam_size,
-    scenegraph_type,
-    winsize,
-    refid,
     return_attention=False,
+    subsample=8,
 ):
     """
     from a list of images, run dust3r inference, global aligner.
     then run get_3D_model_from_scene
     """
     imgs = load_images(filelist, size=image_size, verbose=not silent)
-    if len(imgs) == 1:
-        raise ValueError("Need at least 2 images to reconstruct a scene")
-    if scenegraph_type == "swin":
-        scenegraph_type = scenegraph_type + "-" + str(winsize)
-    elif scenegraph_type == "oneref":
-        scenegraph_type = scenegraph_type + "-" + str(refid)
 
-    pairs = make_ns(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)[
-        0
-    ]
+    pairs = make_ns(imgs)[0]
     # pairs.append(pairs[-1][::-1])
-    output = symmetric_inference(
+    res = symmetric_inference(
         model._model, *pairs, device=device, return_attention=return_attention
     )
 
-    return output
+    xij = [r["pts3d"][0] for r in res]
+    cij = [r["conf"][0] for r in res]
+    dij = [r["desc"][0] for r in res]
+    qij = [r["desc_conf"][0] for r in res]
 
-    # if mode == GlobalAlignerMode.PointCloudOptimizer:
-    #     loss = scene.compute_global_alignment(
-    #         init="mst", niter=niter, schedule=schedule, lr=lr
-    #     )
+    total_corres = []
 
-    # outfile = get_3D_model_from_scene(
-    #     outdir,
-    #     silent,
-    #     scene,
-    #     min_conf_thr,
-    #     as_pointcloud,
-    #     mask_sky,
-    #     clean_depth,
-    #     transparent_cams,
-    #     cam_size,
-    # )
+    for i in range(len(imgs)):
+        for j in range(len(imgs)):
+            if i >= j:
+                continue
+            del_ij = j - i
+            idxes = [
+                i * len(imgs),
+                i * len(imgs) + del_ij,
+                j * len(imgs),
+                j * len(imgs) + ((-del_ij) % len(imgs)),
+            ]
+            corres = extract_correspondences(
+                [dij[ij].detach() for ij in idxes],
+                [qij[ij].detach() for ij in idxes],
+                device=device,
+                subsample=subsample,
+            )
 
-    # # also return rgb, depth and confidence imgs
-    # # depth is normalized with the max value for all images
-    # # we apply the jet colormap on the confidence maps
-    # rgbimg = scene.imgs
-    # depths = to_numpy(scene.get_depthmaps())
-    # confs = to_numpy([c for c in scene.im_conf])
-    # cmap = pl.get_cmap("jet")
-    # depths_max = max([d.max() for d in depths])
-    # depths = [d / depths_max for d in depths]
-    # confs_max = max([d.max() for d in confs])
-    # confs = [cmap(d / confs_max) for d in confs]
+            total_corres.append(corres)
 
-    # imgs = []
-    # for i in range(len(rgbimg)):
-    #     imgs.append(rgbimg[i])
-    #     imgs.append(rgb(depths[i]))
-    #     imgs.append(rgb(confs[i]))
-
-    # return scene, outfile, imgs
+    return res, total_corres
