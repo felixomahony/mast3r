@@ -12,14 +12,15 @@ import seaborn as sns
 from matplotlib.gridspec import GridSpec
 import matplotlib.pyplot as plt
 
-DATA_PATH = Path("/scratch/foo22/Data/Caterpillar")
+DATA_PATH = Path("/Users/cambridge/Documents/Data/Caterpillar/")
 TMP_PATH = "./log"
 WEIGHTS_PATH = "./checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
-DEVICE = "cuda:1"
+DEVICE = "cpu"
 
 IM_SIZE = 512
 N_RUNS = 100
 MAX_N_IMGS = 3
+FAST = True
 
 
 def get_cam2w_gt(data_path):
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     scene_graph = "-".join(scene_graph_params)
 
     # initialise logging
-    mlflow.set_experiment("evaluation_caterpillar")
+    mlflow.set_experiment("evaluation_caterpillar_")
     mlflow.start_run(run_name="trial")
 
     full_results = []
@@ -140,7 +141,7 @@ if __name__ == "__main__":
 
         base_start_time = time.time()
         scene_base = sparse_global_alignment(
-            img_paths, pairs, TMP_PATH, model, device=DEVICE
+            img_paths, pairs, TMP_PATH, model, device=DEVICE, fast_features=FAST
         )
         base_inference_time = time.time() - base_start_time
         cam2w_pred_base = np.array(scene_base.cam2w.detach().cpu())
@@ -150,7 +151,13 @@ if __name__ == "__main__":
 
         lam_start_time = time.time()
         scene_lam = sparse_global_alignment(
-            img_paths, pairs, TMP_PATH, model, device=DEVICE, laminate=True
+            img_paths,
+            pairs,
+            TMP_PATH,
+            model,
+            device=DEVICE,
+            laminate=True,
+            fast_features=FAST,
         )
         lam_inference_time = time.time() - lam_start_time
         cam2w_pred_lam = np.array(scene_lam.cam2w.detach().cpu())

@@ -15,6 +15,7 @@ from collections import namedtuple
 from functools import lru_cache
 from scipy import sparse as sp
 import copy
+import cv2
 
 from mast3r.utils.misc import mkdir_for, hash_md5
 from mast3r.cloud_opt.utils.losses import gamma_loss
@@ -151,6 +152,7 @@ def sparse_global_alignment(
     dtype=torch.float32,
     shared_intrinsics=False,
     laminate=False,
+    fast_features=False,
     **kw,
 ):
     """Sparse alignment with MASt3R
@@ -183,6 +185,7 @@ def sparse_global_alignment(
         subsample=subsample,
         desc_conf=desc_conf,
         device=device,
+        fast_features=fast_features,
     )
 
     # extract canonical pointmaps
@@ -704,6 +707,7 @@ def forward_mast3r(
     desc_conf="desc_conf",
     device="cuda",
     subsample=8,
+    fast_features=False,
     **matching_kw,
 ):
     res_paths = {}
@@ -800,6 +804,12 @@ def forward_mast3r(
                     # save
                     torch.save(to_cpu((X11, C11, X21, C21)), mkdir_for(path1))
                     torch.save(to_cpu((X22, C22, X12, C12)), mkdir_for(path2))
+
+                    # if we use fast, then extract correspondences via a different method
+                    if fast_features:
+                        corres = extract_correspondences_fast(
+                            descs, qonfs, img1, img2, device=device
+                        )
 
                     # perform reciprocal matching
                     corres = extract_correspondences(
@@ -935,6 +945,93 @@ def extract_correspondences(
     corres = (xy1.copy(), xy2.copy(), np.sqrt(cat(qonf1)[idx] * cat(qonf2)[idx]))
 
     return todevice(corres, device)
+
+
+def extract_correspondences_fast(
+    feats, qonfs, img1, img2, device=None, match_threshold=0
+):
+    feat11, feat21, feat22, feat12 = feats
+    qonf11, qonf21, qonf22, qonf12 = qonfs
+    assert feat11.shape[:2] == feat12.shape[:2] == qonf11.shape == qonf12.shape
+    assert feat21.shape[:2] == feat22.shape[:2] == qonf21.shape == qonf22.shape
+
+    # perform fast corner detection on the images
+    img1 = np.array(
+        (img1["img"].cpu().numpy().squeeze() * 0.5 + 0.5) * 255, dtype=np.uint8
+    )
+    img2 = np.array(
+        (img2["img"].cpu().numpy().squeeze() * 0.5 + 0.5) * 255, dtype=np.uint8
+    )
+
+    # detect keypoints
+    fast = cv2.FastFeatureDetector_create()
+    keypoints1 = fast.detect(np.permute_dims(img1, (1, 2, 0)), None)
+    keypoints2 = fast.detect(np.permute_dims(img2, (1, 2, 0)), None)
+
+    # derive points from keypoints
+    keypoints1 = torch.tensor([kp.pt for kp in keypoints1], dtype=int)
+    keypoints2 = torch.tensor([kp.pt for kp in keypoints2], dtype=int)
+
+    g1 = torch.arange(len(keypoints1))
+    g2 = torch.arange(len(keypoints2))
+
+    # compute descriptors
+    desc11 = feat11[keypoints1[:, 1], keypoints1[:, 0]]
+    desc21 = feat21[keypoints2[:, 1], keypoints2[:, 0]]
+
+    # desc22 = feat22[keypoints2[:, 1], keypoints2[:, 0]]
+    # desc12 = feat12[keypoints1[:, 1], keypoints1[:, 0]]
+
+    # normalise desc
+    # desc11 = F.normalize(desc11, p=2, dim=-1)
+    # desc21 = F.normalize(desc21, p=2, dim=-1)
+
+    # desc22 = F.normalize(desc22, p=2, dim=-1)
+    # desc12 = F.normalize(desc12, p=2, dim=-1)
+
+    # match
+    match_1 = (desc11[:, None] * desc21[None]).sum(-1)
+    # match_2 = (desc22[:, None] * desc12[None]).sum(-1)
+
+    # get locations of best pairs
+    mx11 = match_1.max(dim=1)
+    idx11, max11 = mx11.indices, mx11.values
+    mx21 = match_1.max(dim=0)
+    idx21, max21 = mx21.indices, mx21.values
+
+    # mx22 = match_2.max(dim=1)
+    # idx22, max22 = mx22.indices, mx22.values
+    # mx12 = match_2.max(dim=0)
+    # idx12, max12 = mx12.indices, mx12.values
+
+    # validate matches
+    valid_matches21 = torch.logical_and(idx11[idx21] == g2, max21 > match_threshold)
+    valid_matches11 = torch.logical_and(idx21[idx11] == g1, max11 > match_threshold)
+
+    # valid_matches12 = torch.logical_and(idx22[idx12] == g1, max12 > match_threshold)
+    # valid_matches22 = torch.logical_and(idx12[idx22] == g2, max22 > match_threshold)
+
+    # idx21 = idx21[valid_matches21]
+    # idx11 = idx11[idx21]
+    # idx21 = torch.arange(len(valid_matches21))[valid_matches21]
+
+    match_indices_2 = g2[valid_matches21]
+    match_indices_1 = g1[idx21[valid_matches21]]
+
+    # idx22 = idx22[valid_matches22]
+    # idx12 = idx12[idx22]
+    # idx22 = torch.arange(len(valid_matches22))[valid_matches22]
+
+    # merge
+    # idx1_union = torch.unique(torch.cat((idx11, idx12)))
+    # idx2_union = torch.unique(torch.cat((idx21, idx22)))
+
+    xy1 = keypoints1[match_indices_1]
+    xy2 = keypoints2[match_indices_2]
+
+    confidences = torch.ones_like(xy1[:, 0]) * 100
+
+    return todevice((xy1, xy2, confidences), device)
 
 
 @torch.no_grad()

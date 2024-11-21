@@ -24,6 +24,29 @@
         "--device",
         "cpu"
       ]
+    },
+    {
+      "name": "Python Debugger: Fast Demo",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "args": [
+        "--experiment",
+        "truck",
+        "--name",
+        "fast",
+        "--export_path",
+        "./experiments/truck",
+        "--device",
+        "cpu",
+        "--image_folder",
+        "/Users/cambridge/Documents/Data/Truck/",
+        "--image_order",
+        "000001.jpg, 000016.jpg",
+        "--fast",
+        "True"
+      ]
     }
   ]
 }

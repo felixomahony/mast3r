@@ -1,6 +1,9 @@
 from mast3r.demo import *
 from mast3r.cloud_opt.sparse_ga import symmetric_inference
-from mast3r.cloud_opt.sparse_ga import extract_correspondences
+from mast3r.cloud_opt.sparse_ga import (
+    extract_correspondences,
+    extract_correspondences_fast,
+)
 
 import torch
 
@@ -13,6 +16,7 @@ def get_reconstructed_scene_laminated(
     filelist,
     return_attention=False,
     subsample=8,
+    fast=False,
 ):
     """
     from a list of images, run dust3r inference, global aligner.
@@ -44,11 +48,21 @@ def get_reconstructed_scene_laminated(
                 j * len(imgs),
                 j * len(imgs) + ((-del_ij) % len(imgs)),
             ]
-            corres = extract_correspondences(
-                [dij[ij].detach() for ij in idxes],
-                [qij[ij].detach() for ij in idxes],
-                device=device,
-                subsample=subsample,
+            corres = (
+                extract_correspondences(
+                    [dij[ij].detach() for ij in idxes],
+                    [qij[ij].detach() for ij in idxes],
+                    device=device,
+                    subsample=subsample,
+                )
+                if not fast
+                else extract_correspondences_fast(
+                    [dij[ij].detach() for ij in idxes],
+                    [qij[ij].detach() for ij in idxes],
+                    imgs[i],
+                    imgs[j],
+                    device=device,
+                )
             )
 
             total_corres.append(corres)

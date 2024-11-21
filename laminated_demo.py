@@ -100,6 +100,12 @@ def load_config(config_path):
     type=click.STRING,
     required=False,
 )
+@click.option(
+    "--fast",
+    "-f",
+    is_flag=True,
+    help="Use fast features",
+)
 def main(
     config,
     name,
@@ -110,6 +116,7 @@ def main(
     primary_image,
     image_order,
     experiment,
+    fast,
 ):
 
     config = load_config(config)
@@ -121,6 +128,7 @@ def main(
     primary_image = primary_image or config.get("primary_image", None)
     image_order = image_order or config.get("image_order", None)
     experiment = experiment or config.get("experiment", "none")
+    fast = fast or config.get("fast", False)
 
     # initialise logging
     mlflow.set_experiment(experiment)
@@ -188,7 +196,7 @@ def main(
 
     model = LaminatedMast3rModel.default(device=device)
     recon_fun = functools.partial(
-        get_reconstructed_scene_laminated, model, device, False, 512
+        get_reconstructed_scene_laminated, model, device, False, 512, fast=fast
     )
 
     start_time = time.time()
